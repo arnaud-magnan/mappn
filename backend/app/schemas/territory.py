@@ -46,6 +46,9 @@ class TerritoryResponse(BaseModel):
     passive_reward_rate: float
     area_name: Optional[str] = None
     familiarity_rankings: Optional[list[dict[str, Any]]] = None
+    boundary_coordinates: Optional[list[dict[str, float]]] = None
+    center_lat: Optional[float] = None
+    center_lon: Optional[float] = None
 
 
 class TerritoryListResponse(BaseModel):

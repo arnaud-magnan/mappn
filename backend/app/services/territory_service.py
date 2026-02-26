@@ -16,7 +16,9 @@ import datetime
 import logging
 from typing import Any, Optional
 
-from geoalchemy2.functions import ST_DWithin, ST_MakePoint
+import json
+
+from geoalchemy2.functions import ST_AsGeoJSON, ST_Centroid, ST_DWithin, ST_MakePoint
 from geoalchemy2.types import Geography
 from sqlalchemy import cast, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -159,7 +161,12 @@ async def get_nearby_territories(
     user_point = cast(ST_MakePoint(lon, lat), Geography)
 
     stmt = (
-        select(Territory, Area.name.label("area_name"))
+        select(
+            Territory,
+            Area.name.label("area_name"),
+            ST_AsGeoJSON(Area.boundary).label("boundary_geojson"),
+            ST_AsGeoJSON(ST_Centroid(cast(Area.boundary, Geography))).label("centroid_geojson"),
+        )
         .join(Area, Territory.area_id == Area.id)
         .where(ST_DWithin(Area.boundary, user_point, radius_m))
     )
@@ -171,6 +178,29 @@ async def get_nearby_territories(
     for row in rows:
         territory = row[0]
         area_name = row[1]
+
+        # Parse polygon boundary to coordinate array
+        boundary_coordinates = None
+        if row.boundary_geojson:
+            geojson = row.boundary_geojson
+            if isinstance(geojson, str):
+                geojson = json.loads(geojson)
+            coords = geojson.get("coordinates", [[]])[0]
+            boundary_coordinates = [
+                {"latitude": c[1], "longitude": c[0]} for c in coords
+            ]
+
+        # Parse centroid for marker positioning
+        center_lat = None
+        center_lon = None
+        if row.centroid_geojson:
+            centroid = row.centroid_geojson
+            if isinstance(centroid, str):
+                centroid = json.loads(centroid)
+            center_coords = centroid.get("coordinates", [])
+            if len(center_coords) == 2:
+                center_lon, center_lat = center_coords
+
         territories.append({
             "id": territory.id,
             "area_id": territory.area_id,
@@ -180,6 +210,9 @@ async def get_nearby_territories(
             "chief_creature_id": territory.chief_creature_id,
             "passive_reward_rate": territory.passive_reward_rate,
             "familiarity_scores": territory.familiarity_scores or {},
+            "boundary_coordinates": boundary_coordinates,
+            "center_lat": center_lat,
+            "center_lon": center_lon,
         })
 
     return territories
@@ -206,7 +239,13 @@ async def get_territory_detail(
         Territory detail dict, or None if the territory does not exist.
     """
     stmt = (
-        select(Territory, Area.name.label("area_name"), User.username.label("owner_username"))
+        select(
+            Territory,
+            Area.name.label("area_name"),
+            User.username.label("owner_username"),
+            ST_AsGeoJSON(Area.boundary).label("boundary_geojson"),
+            ST_AsGeoJSON(ST_Centroid(cast(Area.boundary, Geography))).label("centroid_geojson"),
+        )
         .join(Area, Territory.area_id == Area.id)
         .outerjoin(User, Territory.owner_id == User.id)
         .where(Territory.id == territory_id)
@@ -221,6 +260,27 @@ async def get_territory_detail(
     territory = row[0]
     area_name = row[1]
     owner_username = row[2]
+
+    # Parse polygon boundary
+    boundary_coordinates = None
+    if row.boundary_geojson:
+        geojson = row.boundary_geojson
+        if isinstance(geojson, str):
+            geojson = json.loads(geojson)
+        coords = geojson.get("coordinates", [[]])[0]
+        boundary_coordinates = [
+            {"latitude": c[1], "longitude": c[0]} for c in coords
+        ]
+
+    center_lat = None
+    center_lon = None
+    if row.centroid_geojson:
+        centroid = row.centroid_geojson
+        if isinstance(centroid, str):
+            centroid = json.loads(centroid)
+        center_coords = centroid.get("coordinates", [])
+        if len(center_coords) == 2:
+            center_lon, center_lat = center_coords
 
     # Extract user's familiarity score from JSONB
     familiarity_scores = territory.familiarity_scores or {}
@@ -245,6 +305,9 @@ async def get_territory_detail(
         "familiar_score_for_user": user_score,
         "passive_reward_rate": territory.passive_reward_rate,
         "familiarity_rankings": rankings,
+        "boundary_coordinates": boundary_coordinates,
+        "center_lat": center_lat,
+        "center_lon": center_lon,
     }
 
 
