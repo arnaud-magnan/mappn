@@ -177,4 +177,37 @@ describe('Step 17: Map Claiming UX', () => {
       expect(content).toContain("position: 'absolute'");
     });
   });
+
+  // =========================================================================
+  // Task 6: MapScreen wires GeofenceCircle + ClaimingProgressHUD
+  // =========================================================================
+  describe('app/(tabs)/index.tsx', () => {
+    let content: string;
+    beforeAll(() => {
+      content = fs.readFileSync(
+        path.join(ROOT, 'app/(tabs)/index.tsx'),
+        'utf-8'
+      );
+    });
+
+    it('imports GeofenceCircle', () => {
+      expect(content).toContain('GeofenceCircle');
+    });
+
+    it('imports ClaimingProgressHUD', () => {
+      expect(content).toContain('ClaimingProgressHUD');
+    });
+
+    it('reads claimingState from locationStore', () => {
+      expect(content).toContain('claimingState');
+    });
+
+    it('renders GeofenceCircle inside MapView when claiming', () => {
+      expect(content).toContain('<GeofenceCircle');
+    });
+
+    it('renders ClaimingProgressHUD outside MapView when claiming', () => {
+      expect(content).toContain('<ClaimingProgressHUD');
+    });
+  });
 });
