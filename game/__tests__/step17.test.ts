@@ -99,4 +99,36 @@ describe('Step 17: Map Claiming UX', () => {
       expect(content).toContain('placeId');
     });
   });
+
+  // =========================================================================
+  // Task 4: GeofenceCircle component
+  // =========================================================================
+  describe('components/map/GeofenceCircle.tsx', () => {
+    let content: string;
+    beforeAll(() => {
+      content = fs.readFileSync(
+        path.join(ROOT, 'components/map/GeofenceCircle.tsx'),
+        'utf-8'
+      );
+    });
+
+    it('file exists', () => {
+      expect(
+        fs.existsSync(path.join(ROOT, 'components/map/GeofenceCircle.tsx'))
+      ).toBe(true);
+    });
+
+    it('imports Circle from react-native-maps', () => {
+      expect(content).toContain("{ Circle }");
+      expect(content).toContain("from 'react-native-maps'");
+    });
+
+    it('uses radius 75 (matching backend geofence_radius_m)', () => {
+      expect(content).toContain('radius={75}');
+    });
+
+    it('exports GeofenceCircle component', () => {
+      expect(content).toMatch(/export.*GeofenceCircle/);
+    });
+  });
 });
