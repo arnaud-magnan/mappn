@@ -212,12 +212,14 @@ async def scrape_popular_times(ctx: dict) -> None:
     redis_client = ctx.get("redis")
 
     async with AsyncSessionLocal() as session:
-        # Fetch all places
-        result = await session.execute(select(Place))
+        # Fetch only places without popular times data
+        result = await session.execute(
+            select(Place).where(Place.busyness_data.is_(None))
+        )
         places = result.scalars().all()
 
         if not places:
-            logger.info("No places to scrape")
+            logger.info("No new places to scrape (all have busyness data)")
             return
 
         # Get activity counts for priority scoring
