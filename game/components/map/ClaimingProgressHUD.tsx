@@ -13,6 +13,7 @@
 
 import React, { memo, useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
 
 import { GAME_COLORS } from '@/constants/colors';
@@ -34,6 +35,7 @@ export const ClaimingProgressHUD = memo(function ClaimingProgressHUD({
   placeName,
   startedAt,
 }: ClaimingProgressHUDProps) {
+  const { top: safeTop } = useSafeAreaInsets();
   const [progress, setProgress] = useState(() =>
     Math.min((Date.now() - startedAt) / VISIT_MIN_DURATION_MS, 1)
   );
@@ -50,7 +52,7 @@ export const ClaimingProgressHUD = memo(function ClaimingProgressHUD({
   const pct = Math.round(progress * 100);
 
   return (
-    <View style={styles.container}>
+    <View style={[styles.container, { top: safeTop + 8 }]}>
       <View style={styles.titleRow}>
         <MaterialIcons name="lock-open" size={15} color={GAME_COLORS.primary} />
         <Text style={styles.title} numberOfLines={1}>
@@ -58,6 +60,7 @@ export const ClaimingProgressHUD = memo(function ClaimingProgressHUD({
         </Text>
       </View>
       <View style={styles.barTrack}>
+        {/* React Native DimensionValue accepts `${number}%` template literals; cast is safe because pct ∈ [0, 100] */}
         <View style={[styles.barFill, { width: `${pct}%` as `${number}%` }]} />
       </View>
       <Text style={styles.pctLabel}>{pct}%</Text>
@@ -68,7 +71,6 @@ export const ClaimingProgressHUD = memo(function ClaimingProgressHUD({
 const styles = StyleSheet.create({
   container: {
     position: 'absolute',
-    top: 60,
     left: 16,
     right: 16,
     backgroundColor: 'rgba(17, 24, 39, 0.92)',
