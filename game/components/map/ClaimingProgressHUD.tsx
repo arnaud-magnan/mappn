@@ -7,8 +7,8 @@
  * geofence detection ping. The backend requires 300 seconds of dwell
  * time for visit confirmation (visit_min_duration_seconds = 300).
  *
- * Positioned absolutely at the top of the map screen (below the safe
- * area inset) so it does not overlap the tab bar or bottom sheet.
+ * Positioned absolutely at the top of the map screen, offset below the
+ * safe area inset so it does not overlap the status bar or notch.
  */
 
 import React, { memo, useEffect, useState } from 'react';
