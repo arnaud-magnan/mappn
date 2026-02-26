@@ -698,7 +698,10 @@ async def claim_home(
 
     if user.home_claimed_at is not None:
         now = datetime.datetime.now(datetime.timezone.utc)
-        elapsed = now - user.home_claimed_at
+        claimed_at = user.home_claimed_at
+        if claimed_at.tzinfo is None:
+            claimed_at = claimed_at.replace(tzinfo=datetime.timezone.utc)
+        elapsed = now - claimed_at
         if elapsed < _HOME_COOLDOWN:
             remaining = _HOME_COOLDOWN - elapsed
             hours = int(remaining.total_seconds() // 3600)

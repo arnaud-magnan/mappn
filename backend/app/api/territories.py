@@ -181,6 +181,8 @@ async def claim_home_endpoint(
     result = await get_territory_detail(
         db=db, territory_id=territory_id, user_id=current_user.id,
     )
+    if result is None:
+        raise EntityNotFoundException("Territory not found")
     return result
 
 

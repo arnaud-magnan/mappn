@@ -45,7 +45,6 @@ class TerritoryResponse(BaseModel):
     familiar_score_for_user: Optional[float] = None
     passive_reward_rate: float
     area_name: Optional[str] = None
-    residents_count: Optional[int] = None
     familiarity_rankings: Optional[list[dict[str, Any]]] = None
 
 
