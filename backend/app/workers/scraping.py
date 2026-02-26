@@ -1,16 +1,15 @@
 """ARQ scraping pipeline workers for Google Maps Popular Times data.
 
-This module defines two scheduled tasks:
+This module defines one scheduled task:
 
-1. **scrape_popular_times**: Weekly full scrape of popular times histograms
-   for all places, ordered by activity-based priority.
-2. **scrape_live_busyness**: Every-15-minute refresh of live busyness levels
-   for places with recent user activity (GPS pings within last 30 minutes).
+**scrape_popular_times**: Weekly scrape of popular times histograms for
+places that don't have data yet, ordered by activity-based priority.
 
-The scraping call is abstracted behind ``fetch_place_busyness()`` and
-``fetch_live_busyness()`` functions so the underlying library can be swapped
-from ``populartimes`` (free, MVP) to ``outscraper`` (production) without
-changing business logic.
+The scraping call is abstracted behind ``fetch_place_busyness()`` which
+uses the Outscraper SDK to fetch data from Google Maps.
+
+Each place is scraped only once. Once ``busyness_data`` is populated,
+the place is skipped in subsequent runs.
 
 Workers create their own ``AsyncSession`` via ``AsyncSessionLocal`` -- they
 are independent from the FastAPI request lifecycle.
@@ -45,42 +44,21 @@ SCRAPE_DELAY_SECONDS: float = 36.0
 # tracking service).  Keys follow the pattern:  activity:place:<place_id>
 _ACTIVITY_KEY_PREFIX = "activity:place:"
 
-# Redis key prefix for UserPresence tracking (written by visit service)
-_PRESENCE_KEY_PREFIX = "presence:"
-
-# Google Maps API key (read from settings; used by populartimes)
-_GOOGLE_API_KEY: str | None = None
-
-
-def _get_google_api_key() -> str:
-    """Lazy-load the Google API key from settings."""
-    global _GOOGLE_API_KEY
-    if _GOOGLE_API_KEY is None:
-        settings = get_settings()
-        _GOOGLE_API_KEY = getattr(settings, "google_api_key", "")
-    return _GOOGLE_API_KEY
-
-
 # ---------------------------------------------------------------------------
-# Scraping abstraction layer
+# Scraping abstraction layer (Outscraper)
 # ---------------------------------------------------------------------------
-# These functions wrap the populartimes library so it can be replaced with
-# outscraper or another provider by changing only this section.
 
 try:
-    import populartimes  # type: ignore[import-untyped]
+    from outscraper import ApiClient as OutscraperClient  # type: ignore[import-untyped]
 except ImportError:
-    populartimes = None  # type: ignore[assignment]
+    OutscraperClient = None  # type: ignore[assignment]
     logger.warning(
-        "populartimes library not installed; scraping functions will return None"
+        "outscraper library not installed; scraping functions will return None"
     )
 
 
 def fetch_place_busyness(google_place_id: str) -> dict[str, Any] | None:
-    """Fetch full popular times data for a place.
-
-    Abstracts the underlying scraping library so it can be swapped in
-    the future (e.g. from populartimes to outscraper).
+    """Fetch full popular times data for a place via Outscraper.
 
     Returns a dict with keys:
         - ``popular_times``: list of 7 day objects with hourly data
@@ -90,53 +68,47 @@ def fetch_place_busyness(google_place_id: str) -> dict[str, Any] | None:
     Returns ``None`` on any failure.
     """
     try:
-        if populartimes is None:
-            logger.error("populartimes library not available")
+        if OutscraperClient is None:
+            logger.error("outscraper library not available")
             return None
 
-        api_key = _get_google_api_key()
-        raw = populartimes.get_id(api_key, google_place_id)
+        settings = get_settings()
+        client = OutscraperClient(api_key=settings.outscraper_api_key)
+        results = client.google_maps_search([google_place_id], limit=1, language="en")
 
-        # Transform to our canonical JSONB structure
+        if not results or not results[0]:
+            logger.warning("No results from outscraper for %s", google_place_id)
+            return None
+
+        place_data = results[0][0] if isinstance(results[0], list) else results[0]
+
+        # Transform outscraper popular_times to our canonical format
+        # Outscraper: [{"day": 1..7, "popular_times": [{"hour": 0-23, "percentage": 0-100, ...}]}]
+        # Ours: [{"day": 0..6, "hours": [24 ints]}]
+        raw_pt = place_data.get("popular_times")
         popular_times = []
-        for i, day_data in enumerate(raw.get("populartimes", [])):
-            popular_times.append({
-                "day": i,
-                "hours": day_data.get("data", [0] * 24),
-            })
+        if raw_pt:
+            for day_data in raw_pt:
+                hours = [0] * 24
+                for entry in day_data.get("popular_times", []):
+                    hour = entry.get("hour", 0)
+                    if 0 <= hour < 24:
+                        hours[hour] = entry.get("percentage", 0)
+                # Outscraper uses 1=Monday..7=Sunday; convert to 0=Monday..6=Sunday
+                day_index = day_data.get("day", 1) - 1
+                popular_times.append({
+                    "day": day_index,
+                    "hours": hours,
+                })
 
         return {
             "popular_times": popular_times,
-            "current_popularity": raw.get("current_popularity"),
-            "time_spent": raw.get("time_spent"),
+            "current_popularity": place_data.get("current_popularity"),
+            "time_spent": None,
         }
     except Exception:
         logger.exception(
             "Failed to fetch popular times for place %s", google_place_id
-        )
-        return None
-
-
-def fetch_live_busyness(google_place_id: str) -> int | None:
-    """Fetch only the current live busyness level for a place.
-
-    Returns the current_popularity integer (0-100) or ``None`` on failure
-    or when the data is not available.
-    """
-    try:
-        if populartimes is None:
-            logger.error("populartimes library not available")
-            return None
-
-        api_key = _get_google_api_key()
-        raw = populartimes.get_id(api_key, google_place_id)
-        current = raw.get("current_popularity")
-        if current is None:
-            return None
-        return int(current)
-    except Exception:
-        logger.exception(
-            "Failed to fetch live busyness for place %s", google_place_id
         )
         return None
 
@@ -214,41 +186,6 @@ async def _get_activity_counts(
         logger.exception("Error scanning Redis for activity counts")
 
     return counts
-
-
-async def _get_active_place_ids(
-    redis_client: Any,
-) -> set[int]:
-    """Get IDs of places with user activity in the last 30 minutes.
-
-    A place is considered "active" if there are presence keys or activity
-    keys for it in Redis.
-    """
-    active_ids: set[int] = set()
-
-    try:
-        # Check presence keys (these have 30-min TTL by default)
-        async for key in redis_client.scan_iter(f"{_PRESENCE_KEY_PREFIX}*"):
-            try:
-                parts = key.replace(_PRESENCE_KEY_PREFIX, "").split(":")
-                if len(parts) == 2:
-                    place_id = int(parts[1])
-                    active_ids.add(place_id)
-            except (ValueError, TypeError):
-                continue
-
-        # Also check activity keys
-        async for key in redis_client.scan_iter(f"{_ACTIVITY_KEY_PREFIX}*"):
-            try:
-                place_id_str = key.replace(_ACTIVITY_KEY_PREFIX, "")
-                place_id = int(place_id_str)
-                active_ids.add(place_id)
-            except (ValueError, TypeError):
-                continue
-    except Exception:
-        logger.exception("Error scanning Redis for active place IDs")
-
-    return active_ids
 
 
 # ---------------------------------------------------------------------------
