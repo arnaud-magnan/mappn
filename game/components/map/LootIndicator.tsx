@@ -10,7 +10,7 @@
  * causing the bitmap to go stale and the marker to disappear.
  */
 
-import React, { memo, useEffect, useRef } from 'react';
+import React, { memo, useEffect, useRef, useState } from 'react';
 import { Animated, Easing, StyleSheet, View } from 'react-native';
 import { Marker } from 'react-native-maps';
 import MaterialIcons from '@expo/vector-icons/MaterialIcons';
@@ -36,6 +36,12 @@ export const LootIndicator = memo(function LootIndicator({
 }: LootIndicatorProps) {
   const scaleAnim = useRef(new Animated.Value(1)).current;
   const opacityAnim = useRef(new Animated.Value(1)).current;
+  const [tracksViewChanges, setTracksViewChanges] = useState(true);
+
+  useEffect(() => {
+    const id = setTimeout(() => setTracksViewChanges(false), 500);
+    return () => clearTimeout(id);
+  }, []);
 
   useEffect(() => {
     const pulse = Animated.loop(
@@ -72,13 +78,17 @@ export const LootIndicator = memo(function LootIndicator({
     );
 
     pulse.start();
-    return () => pulse.stop();
+    return () => {
+      pulse.stop();
+      scaleAnim.setValue(1);
+      opacityAnim.setValue(1);
+    };
   }, [scaleAnim, opacityAnim]);
 
   return (
     <Marker
       coordinate={{ latitude, longitude }}
-      tracksViewChanges={true}
+      tracksViewChanges={tracksViewChanges}
       onPress={onPress}
       title={placeName ?? 'Loot nearby'}
       anchor={{ x: 0.5, y: 0.5 }}>

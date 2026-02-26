@@ -33,8 +33,8 @@ describe('Step 17: Map Claiming UX', () => {
       expect(content).toContain('useRef(new Animated.Value');
     });
 
-    it('keeps tracksViewChanges={true}', () => {
-      expect(content).toContain('tracksViewChanges={true}');
+    it('uses tracksViewChanges prop on Marker', () => {
+      expect(content).toContain('tracksViewChanges={tracksViewChanges}');
     });
   });
 });
