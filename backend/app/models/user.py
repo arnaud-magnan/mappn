@@ -5,9 +5,9 @@ Supports future FK references from game/social entity tables via integer PK.
 """
 
 import datetime
-from typing import Any
+from typing import Any, Optional
 
-from sqlalchemy import Integer, String, DateTime
+from sqlalchemy import Integer, String, DateTime, ForeignKey
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base
@@ -39,9 +39,16 @@ class User(Base):
         default=datetime.datetime.now(datetime.timezone.utc),
         nullable=False,
     )
+    home_territory_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("territories.id"), nullable=True, index=True,
+    )
+    home_claimed_at: Mapped[Optional[datetime.datetime]] = mapped_column(
+        DateTime(timezone=True), nullable=True,
+    )
 
     # Relationships
     visits: Mapped[list["Visit"]] = relationship("Visit", back_populates="user")
+    creatures: Mapped[list["Creature"]] = relationship("Creature", back_populates="user")
 
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username='{self.username}', email='{self.email}')>"
