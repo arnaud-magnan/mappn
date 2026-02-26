@@ -68,4 +68,35 @@ describe('Step 17: Map Claiming UX', () => {
       expect(content).toContain('setClaimingState:');
     });
   });
+
+  // =========================================================================
+  // Task 3: useLocationTracking manages claimingState
+  // =========================================================================
+  describe('hooks/useLocationTracking.ts', () => {
+    let content: string;
+    beforeAll(() => {
+      content = fs.readFileSync(
+        path.join(ROOT, 'hooks/useLocationTracking.ts'),
+        'utf-8'
+      );
+    });
+
+    it('reads setClaimingState from locationStore', () => {
+      expect(content).toContain('setClaimingState');
+    });
+
+    it('calls setClaimingState when nearby_places is non-empty', () => {
+      expect(content).toContain('nearby_places');
+      expect(content).toContain('setClaimingState({');
+    });
+
+    it('clears claimingState when nearby_places is empty', () => {
+      expect(content).toContain('setClaimingState(null)');
+    });
+
+    it('preserves startedAt when same place is already being tracked', () => {
+      expect(content).toContain('claimingState');
+      expect(content).toContain('placeId');
+    });
+  });
 });
