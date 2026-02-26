@@ -21,8 +21,8 @@ class Settings(BaseSettings):
     visit_min_duration_seconds: int = 300
     visit_min_readings: int = 3
 
-    # Google Maps API
-    google_api_key: str = ""
+    # Outscraper API
+    outscraper_api_key: str = ""
 
     # Application
     debug: bool = False
