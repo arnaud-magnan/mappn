@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any
 
 from arq import cron
@@ -155,9 +155,6 @@ async def _get_activity_counts(
 
     Scans for keys matching the ``activity:place:<id>`` pattern and returns
     a mapping of place_id to activity count.
-
-    Also scans UserPresence keys (``presence:<user_id>:<place_id>``) as
-    evidence of recent GPS pings near a place.
     """
     counts: dict[int, int] = {}
 
@@ -169,17 +166,6 @@ async def _get_activity_counts(
                 place_id = int(place_id_str)
                 value = await redis_client.get(key)
                 counts[place_id] = int(value) if value else 1
-            except (ValueError, TypeError):
-                continue
-
-        # Also count presence keys as activity evidence
-        async for key in redis_client.scan_iter(f"{_PRESENCE_KEY_PREFIX}*"):
-            try:
-                # Key format: presence:<user_id>:<place_id>
-                parts = key.replace(_PRESENCE_KEY_PREFIX, "").split(":")
-                if len(parts) == 2:
-                    place_id = int(parts[1])
-                    counts[place_id] = counts.get(place_id, 0) + 1
             except (ValueError, TypeError):
                 continue
     except Exception:
