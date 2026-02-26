@@ -293,103 +293,6 @@ async def scrape_popular_times(ctx: dict) -> None:
 
 
 # ---------------------------------------------------------------------------
-# ARQ task: scrape_live_busyness (every 15 minutes)
-# ---------------------------------------------------------------------------
-
-
-async def scrape_live_busyness(ctx: dict) -> None:
-    """Refresh live busyness levels for places with recent user activity.
-
-    This task runs every 15 minutes.  It only targets places that have
-    had GPS pings within the last 30 minutes (i.e. users are actively
-    near those places).  For each active place it:
-
-    1. Calls ``fetch_live_busyness()`` to get current_popularity.
-    2. Updates the ``current_popularity`` field in ``Place.busyness_data``.
-    3. Updates ``busyness_updated_at``.
-    4. Sleeps ``SCRAPE_DELAY_SECONDS`` between requests.
-
-    Individual failures are caught, logged, and do not interrupt other places.
-    """
-    logger.info("Starting live busyness refresh")
-
-    redis_client = ctx.get("redis")
-
-    # Determine which places are active
-    active_place_ids: set[int] = set()
-    if redis_client:
-        active_place_ids = await _get_active_place_ids(redis_client)
-
-    if not active_place_ids:
-        logger.info("No active places to refresh live busyness")
-        return
-
-    async with AsyncSessionLocal() as session:
-        # Fetch only active places
-        result = await session.execute(
-            select(Place).where(Place.id.in_(active_place_ids))
-        )
-        places = result.scalars().all()
-
-        if not places:
-            logger.info("No matching places found in database for active IDs")
-            return
-
-        refreshed = 0
-        failed = 0
-
-        for place in places:
-            try:
-                current_popularity = fetch_live_busyness(place.google_place_id)
-
-                if current_popularity is None:
-                    logger.warning(
-                        "Failed to fetch live busyness for place %d (%s) "
-                        "-- will retry next cycle",
-                        place.id,
-                        place.name,
-                    )
-                    failed += 1
-                    await asyncio.sleep(SCRAPE_DELAY_SECONDS)
-                    continue
-
-                # Update current_popularity in busyness_data JSONB
-                existing = place.busyness_data or {}
-                existing["current_popularity"] = current_popularity
-                place.busyness_data = existing
-                place.busyness_updated_at = datetime.now(timezone.utc)
-
-                await session.commit()
-                refreshed += 1
-
-                logger.debug(
-                    "Refreshed live busyness for place %d (%s): %d",
-                    place.id,
-                    place.name,
-                    current_popularity,
-                )
-
-            except Exception:
-                logger.exception(
-                    "Unexpected error refreshing live busyness for place %d (%s)",
-                    place.id,
-                    place.name,
-                )
-                failed += 1
-                await session.rollback()
-
-            # Respect throughput limit
-            await asyncio.sleep(SCRAPE_DELAY_SECONDS)
-
-        logger.info(
-            "Live busyness refresh complete: %d refreshed, %d failed out of %d active",
-            refreshed,
-            failed,
-            len(places),
-        )
-
-
-# ---------------------------------------------------------------------------
 # ARQ WorkerSettings
 # ---------------------------------------------------------------------------
 
@@ -446,22 +349,17 @@ class WorkerSettings:
         python -m arq app.workers.scraping.WorkerSettings
     """
 
-    functions = [scrape_popular_times, scrape_live_busyness]
+    functions = [scrape_popular_times]
 
     cron_jobs = [
         # Weekly popular times scrape -- runs every Sunday at 03:00 UTC
+        # Only targets places without existing busyness_data.
         cron(
             scrape_popular_times,
             weekday={6},  # Sunday
             hour={3},
             minute={0},
             timeout=7200,  # 2 hours max
-        ),
-        # Live busyness refresh -- runs every 15 minutes
-        cron(
-            scrape_live_busyness,
-            minute={0, 15, 30, 45},
-            timeout=900,  # 15 minutes max
         ),
     ]
 
