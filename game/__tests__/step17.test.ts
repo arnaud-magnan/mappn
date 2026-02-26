@@ -37,4 +37,35 @@ describe('Step 17: Map Claiming UX', () => {
       expect(content).toContain('tracksViewChanges={tracksViewChanges}');
     });
   });
+
+  // =========================================================================
+  // Task 2: locationStore has ClaimingState
+  // =========================================================================
+  describe('stores/locationStore.ts', () => {
+    let content: string;
+    beforeAll(() => {
+      content = fs.readFileSync(
+        path.join(ROOT, 'stores/locationStore.ts'),
+        'utf-8'
+      );
+    });
+
+    it('exports ClaimingState interface', () => {
+      expect(content).toMatch(/export\s+interface\s+ClaimingState/);
+    });
+
+    it('ClaimingState has placeId, placeName, startedAt', () => {
+      expect(content).toContain('placeId: number');
+      expect(content).toContain('placeName: string');
+      expect(content).toContain('startedAt: number');
+    });
+
+    it('LocationState has claimingState field', () => {
+      expect(content).toContain('claimingState: ClaimingState | null');
+    });
+
+    it('LocationState has setClaimingState action', () => {
+      expect(content).toContain('setClaimingState:');
+    });
+  });
 });
