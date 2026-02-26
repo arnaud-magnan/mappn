@@ -131,4 +131,50 @@ describe('Step 17: Map Claiming UX', () => {
       expect(content).toMatch(/export.*GeofenceCircle/);
     });
   });
+
+  // =========================================================================
+  // Task 5: ClaimingProgressHUD component
+  // =========================================================================
+  describe('components/map/ClaimingProgressHUD.tsx', () => {
+    let content: string;
+    beforeAll(() => {
+      content = fs.readFileSync(
+        path.join(ROOT, 'components/map/ClaimingProgressHUD.tsx'),
+        'utf-8'
+      );
+    });
+
+    it('file exists', () => {
+      expect(
+        fs.existsSync(path.join(ROOT, 'components/map/ClaimingProgressHUD.tsx'))
+      ).toBe(true);
+    });
+
+    it('exports ClaimingProgressHUD component', () => {
+      expect(content).toMatch(/export.*ClaimingProgressHUD/);
+    });
+
+    it('accepts placeName and startedAt props', () => {
+      expect(content).toContain('placeName');
+      expect(content).toContain('startedAt');
+    });
+
+    it('updates progress with setInterval', () => {
+      expect(content).toContain('setInterval');
+      expect(content).toContain('clearInterval');
+    });
+
+    it('uses VISIT_MIN_DURATION_MS of 300_000 for progress calculation', () => {
+      // 5 minutes = 300 000 ms (mirrors backend visit_min_duration_seconds = 300)
+      expect(content).toContain('300_000');
+    });
+
+    it('renders Unlocking text', () => {
+      expect(content).toContain('Unlocking');
+    });
+
+    it('is absolutely positioned', () => {
+      expect(content).toContain("position: 'absolute'");
+    });
+  });
 });
