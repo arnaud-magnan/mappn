@@ -261,7 +261,9 @@ export default function MapScreen() {
           />
         ))}
 
-        {/* Geofence circle: shows 75m boundary while actively claiming a territory */}
+        {/* Geofence circle: shows 75m boundary while actively claiming a territory.
+            Note: centered on player position (place lat/lon not in ping response).
+            TODO: add lat/lon to NearbyPlaceInfo to center on the actual place. */}
         {claimingState !== null && userLat !== null && userLon !== null && (
           <GeofenceCircle latitude={userLat} longitude={userLon} />
         )}
@@ -363,7 +365,7 @@ const styles = StyleSheet.create({
   },
   loadingOverlay: {
     position: 'absolute',
-    top: 120,
+    top: 200,  // was 120 — moved down to clear ClaimingProgressHUD (~80px tall)
     alignSelf: 'center',
     backgroundColor: GAME_COLORS.background,
     borderRadius: 8,
@@ -376,7 +378,7 @@ const styles = StyleSheet.create({
   },
   errorBanner: {
     position: 'absolute',
-    top: 120,
+    top: 200,  // was 120 — moved down to clear ClaimingProgressHUD (~80px tall)
     left: 16,
     right: 16,
     backgroundColor: '#fef2f2',
