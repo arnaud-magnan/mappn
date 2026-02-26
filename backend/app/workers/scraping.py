@@ -56,6 +56,22 @@ except ImportError:
         "outscraper library not installed; scraping functions will return None"
     )
 
+_outscraper_client: OutscraperClient | None = None  # type: ignore[valid-type]
+
+
+def _get_outscraper_client():
+    """Lazy-load the Outscraper API client."""
+    global _outscraper_client
+    if _outscraper_client is None:
+        if OutscraperClient is None:
+            return None
+        settings = get_settings()
+        if not settings.outscraper_api_key:
+            logger.error("OUTSCRAPER_API_KEY is not configured")
+            return None
+        _outscraper_client = OutscraperClient(api_key=settings.outscraper_api_key)
+    return _outscraper_client
+
 
 def fetch_place_busyness(google_place_id: str) -> dict[str, Any] | None:
     """Fetch full popular times data for a place via Outscraper.
@@ -63,17 +79,15 @@ def fetch_place_busyness(google_place_id: str) -> dict[str, Any] | None:
     Returns a dict with keys:
         - ``popular_times``: list of 7 day objects with hourly data
         - ``current_popularity``: int or None
-        - ``time_spent``: [min, max] minutes or None
+        - ``time_spent``: always None (not available from outscraper)
 
     Returns ``None`` on any failure.
     """
     try:
-        if OutscraperClient is None:
-            logger.error("outscraper library not available")
+        client = _get_outscraper_client()
+        if client is None:
             return None
 
-        settings = get_settings()
-        client = OutscraperClient(api_key=settings.outscraper_api_key)
         results = client.google_maps_search([google_place_id], limit=1, language="en")
 
         if not results or not results[0]:
@@ -225,7 +239,7 @@ async def scrape_popular_times(ctx: dict) -> None:
 
         for place in sorted_places:
             try:
-                data = fetch_place_busyness(place.google_place_id)
+                data = await asyncio.to_thread(fetch_place_busyness, place.google_place_id)
 
                 if data is None:
                     logger.warning(
@@ -244,9 +258,6 @@ async def scrape_popular_times(ctx: dict) -> None:
                 existing["popular_times"] = data.get("popular_times", [])
                 if data.get("current_popularity") is not None:
                     existing["current_popularity"] = data["current_popularity"]
-                if data.get("time_spent") is not None:
-                    existing["time_spent"] = data["time_spent"]
-
                 place.busyness_data = existing
                 place.busyness_updated_at = datetime.now(timezone.utc)
 

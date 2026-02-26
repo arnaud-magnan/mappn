@@ -26,7 +26,7 @@ fastapi-cache2[redis]==0.2.2
 httpx==0.28.0
 
 # Scraping
-outscraper
+outscraper==6.0.2
 
 # Testing
 pytest-asyncio==0.25.0

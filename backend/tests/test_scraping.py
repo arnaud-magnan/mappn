@@ -142,13 +142,11 @@ class TestWorkerSettings:
 class TestFetchPlaceBusyness:
     """Tests for the outscraper-based scraping function."""
 
-    @patch("app.workers.scraping.get_settings")
-    @patch("app.workers.scraping.OutscraperClient")
-    def test_fetch_place_busyness_calls_outscraper(self, mock_client_cls, mock_settings):
+    @patch("app.workers.scraping._get_outscraper_client")
+    def test_fetch_place_busyness_calls_outscraper(self, mock_get_client):
         """The abstraction should delegate to outscraper."""
-        mock_settings.return_value.outscraper_api_key = "test-key"
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.google_maps_search.return_value = _sample_outscraper_response()
 
         result = fetch_place_busyness("ChIJ_test_id_123")
@@ -156,13 +154,11 @@ class TestFetchPlaceBusyness:
         mock_client.google_maps_search.assert_called_once()
         assert result is not None
 
-    @patch("app.workers.scraping.get_settings")
-    @patch("app.workers.scraping.OutscraperClient")
-    def test_fetch_place_busyness_returns_structured_data(self, mock_client_cls, mock_settings):
+    @patch("app.workers.scraping._get_outscraper_client")
+    def test_fetch_place_busyness_returns_structured_data(self, mock_get_client):
         """Result should contain popular_times and current_popularity."""
-        mock_settings.return_value.outscraper_api_key = "test-key"
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.google_maps_search.return_value = _sample_outscraper_response()
 
         result = fetch_place_busyness("ChIJ_test_id_123")
@@ -170,31 +166,39 @@ class TestFetchPlaceBusyness:
         assert "popular_times" in result
         assert "current_popularity" in result
         assert len(result["popular_times"]) == 7
-        # Verify day index conversion (outscraper 1-based -> our 0-based)
         assert result["popular_times"][0]["day"] == 0
         assert len(result["popular_times"][0]["hours"]) == 24
 
-    @patch("app.workers.scraping.get_settings")
-    @patch("app.workers.scraping.OutscraperClient")
-    def test_fetch_place_busyness_returns_none_on_failure(self, mock_client_cls, mock_settings):
+    @patch("app.workers.scraping._get_outscraper_client")
+    def test_fetch_place_busyness_returns_none_on_failure(self, mock_get_client):
         """Should return None when the underlying library raises an exception."""
-        mock_settings.return_value.outscraper_api_key = "test-key"
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.google_maps_search.side_effect = Exception("API error")
 
         result = fetch_place_busyness("ChIJ_test_id_123")
         assert result is None
 
-    @patch("app.workers.scraping.get_settings")
-    @patch("app.workers.scraping.OutscraperClient")
-    def test_fetch_place_busyness_returns_none_on_empty_response(self, mock_client_cls, mock_settings):
+    @patch("app.workers.scraping._get_outscraper_client")
+    def test_fetch_place_busyness_returns_none_on_empty_response(self, mock_get_client):
         """Should return None when outscraper returns no results."""
-        mock_settings.return_value.outscraper_api_key = "test-key"
         mock_client = MagicMock()
-        mock_client_cls.return_value = mock_client
+        mock_get_client.return_value = mock_client
         mock_client.google_maps_search.return_value = [[]]
 
+        result = fetch_place_busyness("ChIJ_test_id_123")
+        assert result is None
+
+    def test_fetch_place_busyness_returns_none_when_client_unavailable(self):
+        """Should return None when outscraper client cannot be created."""
+        with patch("app.workers.scraping._get_outscraper_client", return_value=None):
+            result = fetch_place_busyness("ChIJ_test_id_123")
+            assert result is None
+
+    @patch("app.workers.scraping._outscraper_client", None)
+    @patch("app.workers.scraping.OutscraperClient", None)
+    def test_fetch_place_busyness_returns_none_when_library_unavailable(self):
+        """Should return None when outscraper library is not installed."""
         result = fetch_place_busyness("ChIJ_test_id_123")
         assert result is None
 
@@ -238,6 +242,11 @@ class TestPriorityScoring:
 # ---------------------------------------------------------------------------
 
 
+async def _fake_to_thread(func, *args, **kwargs):
+    """Test helper: simulate asyncio.to_thread by calling func synchronously."""
+    return func(*args, **kwargs)
+
+
 class TestScrapePopularTimes:
     """Tests for the scrape_popular_times ARQ task."""
 
@@ -260,17 +269,16 @@ class TestScrapePopularTimes:
         with (
             patch("app.workers.scraping.AsyncSessionLocal", return_value=mock_session),
             patch("app.workers.scraping.fetch_place_busyness") as mock_fetch,
-            patch("app.workers.scraping.asyncio") as mock_asyncio,
+            patch("app.workers.scraping.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("app.workers.scraping.asyncio.to_thread", side_effect=_fake_to_thread),
             patch("app.workers.scraping._get_activity_counts") as mock_activity,
         ):
             mock_fetch.return_value = {
                 "popular_times": sample_popular_times,
                 "current_popularity": 65,
-                "time_spent": [15, 30],
+                "time_spent": None,
             }
             mock_activity.return_value = {1: 5}
-            # Make asyncio.sleep a no-op
-            mock_asyncio.sleep = AsyncMock()
 
             await scrape_popular_times(ctx)
 
@@ -289,9 +297,6 @@ class TestScrapePopularTimes:
         )
         assert place.busyness_data.get("current_popularity") == 65, (
             "current_popularity should be 65"
-        )
-        assert place.busyness_data.get("time_spent") == [15, 30], (
-            "time_spent should be [15, 30]"
         )
         assert place.busyness_updated_at is not None, (
             "busyness_updated_at must be set after successful scrape"
@@ -326,16 +331,16 @@ class TestScrapePopularTimes:
             return {
                 "popular_times": _sample_canonical_popular_times(),
                 "current_popularity": 50,
-                "time_spent": [10, 20],
+                "time_spent": None,
             }
 
         with (
             patch("app.workers.scraping.AsyncSessionLocal", return_value=mock_session),
             patch("app.workers.scraping.fetch_place_busyness", side_effect=side_effect),
-            patch("app.workers.scraping.asyncio") as mock_asyncio,
+            patch("app.workers.scraping.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("app.workers.scraping.asyncio.to_thread", side_effect=_fake_to_thread),
             patch("app.workers.scraping._get_activity_counts") as mock_activity,
         ):
-            mock_asyncio.sleep = AsyncMock()
             mock_activity.return_value = {}
 
             await scrape_popular_times(ctx)
@@ -370,7 +375,7 @@ class TestScrapePopularTimes:
             return {
                 "popular_times": _sample_canonical_popular_times(),
                 "current_popularity": 50,
-                "time_spent": [10, 20],
+                "time_spent": None,
             }
 
         # Make commit raise an exception on the first call, succeed on the second
@@ -388,10 +393,10 @@ class TestScrapePopularTimes:
         with (
             patch("app.workers.scraping.AsyncSessionLocal", return_value=mock_session),
             patch("app.workers.scraping.fetch_place_busyness", side_effect=fetch_side_effect),
-            patch("app.workers.scraping.asyncio") as mock_asyncio,
+            patch("app.workers.scraping.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("app.workers.scraping.asyncio.to_thread", side_effect=_fake_to_thread),
             patch("app.workers.scraping._get_activity_counts") as mock_activity,
         ):
-            mock_asyncio.sleep = AsyncMock()
             mock_activity.return_value = {}
 
             # Should NOT raise -- exceptions are caught per-place
@@ -438,16 +443,16 @@ class TestScrapePopularTimes:
             return {
                 "popular_times": _sample_canonical_popular_times(),
                 "current_popularity": 50,
-                "time_spent": [10, 20],
+                "time_spent": None,
             }
 
         with (
             patch("app.workers.scraping.AsyncSessionLocal", return_value=mock_session),
             patch("app.workers.scraping.fetch_place_busyness", side_effect=track_fetch),
-            patch("app.workers.scraping.asyncio") as mock_asyncio,
+            patch("app.workers.scraping.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("app.workers.scraping.asyncio.to_thread", side_effect=_fake_to_thread),
             patch("app.workers.scraping._get_activity_counts") as mock_activity,
         ):
-            mock_asyncio.sleep = AsyncMock()
             # place_high (id=2) has more activity
             mock_activity.return_value = {2: 20, 1: 0}
 
@@ -475,7 +480,8 @@ class TestScrapePopularTimes:
         with (
             patch("app.workers.scraping.AsyncSessionLocal", return_value=mock_session),
             patch("app.workers.scraping.fetch_place_busyness") as mock_fetch,
-            patch("app.workers.scraping.asyncio") as mock_asyncio,
+            patch("app.workers.scraping.asyncio.sleep", new_callable=AsyncMock) as mock_sleep,
+            patch("app.workers.scraping.asyncio.to_thread", side_effect=_fake_to_thread),
             patch("app.workers.scraping._get_activity_counts") as mock_activity,
         ):
             mock_fetch.return_value = {
@@ -484,13 +490,12 @@ class TestScrapePopularTimes:
                 "time_spent": None,
             }
             mock_activity.return_value = {}
-            mock_asyncio.sleep = AsyncMock()
 
             await scrape_popular_times(ctx)
 
         # asyncio.sleep should have been called with the configured delay
-        mock_asyncio.sleep.assert_called()
-        call_args = mock_asyncio.sleep.call_args_list
+        mock_sleep.assert_called()
+        call_args = mock_sleep.call_args_list
         for call in call_args:
             delay = call[0][0]
             assert delay >= SCRAPE_DELAY_SECONDS, (
